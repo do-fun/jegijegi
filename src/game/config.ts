@@ -1,9 +1,9 @@
 import Phaser from 'phaser';
+import { GAME_HEIGHT, GAME_WIDTH } from './dimensions';
 import { GameScene } from './scenes/GameScene';
+import { ResultScene } from './scenes/ResultScene';
 import { TitleScene } from './scenes/TitleScene';
-
-export const GAME_WIDTH = 1440;
-export const GAME_HEIGHT = 900;
+import { TutorialScene } from './scenes/TutorialScene';
 
 export const gameConfig: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
@@ -12,7 +12,7 @@ export const gameConfig: Phaser.Types.Core.GameConfig = {
   width: GAME_WIDTH,
   height: GAME_HEIGHT,
   scale: {
-    mode: Phaser.Scale.FIT,
+    mode: Phaser.Scale.RESIZE,
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
   render: {
@@ -23,5 +23,5 @@ export const gameConfig: Phaser.Types.Core.GameConfig = {
   input: {
     activePointers: 3,
   },
-  scene: [TitleScene, GameScene],
+  scene: [TitleScene, TutorialScene, GameScene, ResultScene],
 };

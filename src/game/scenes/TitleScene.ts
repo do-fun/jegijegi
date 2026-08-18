@@ -1,14 +1,14 @@
 import Phaser from 'phaser';
-import { GAME_HEIGHT, GAME_WIDTH } from '../config';
+import { GAME_HEIGHT, GAME_WIDTH } from '../dimensions';
+import { isConfirmKey } from '../inputKeys';
+import { shouldShowTutorial, TUTORIAL_SEEN_KEY } from '../progress';
+import { drawNaturalBackdrop } from '../naturalBackdrop';
+import { configureResponsiveCamera } from '../responsiveCamera';
 
 const COLORS = {
-  navy: 0x071b2f,
-  blue: 0x123c58,
-  sky: 0x5bbbc8,
-  cream: '#f7e9c8',
-  mutedCream: '#c9bea4',
-  red: 0xef5b4c,
-  gold: 0xf1bd4a,
+  navy: 0xaedbe8,
+  cream: '#173e43',
+  mutedCream: '#4e6b5f',
 };
 
 const FONT_FAMILY = 'Pretendard, Apple SD Gothic Neo, Noto Sans KR, sans-serif';
@@ -20,9 +20,16 @@ export class TitleScene extends Phaser.Scene {
     super('TitleScene');
   }
 
+  preload(): void {
+    if (!this.textures.exists('jegi-real')) {
+      this.load.image('jegi-real', '/assets/items/jegi-real.png');
+    }
+  }
+
   create(): void {
     // Phaser는 Scene 인스턴스를 재사용하므로 재진입할 때 시작 잠금을 초기화한다.
     this.isStarting = false;
+    configureResponsiveCamera(this);
     this.cameras.main.setBackgroundColor(COLORS.navy);
     this.drawBackdrop();
     this.drawTopStats();
@@ -31,41 +38,17 @@ export class TitleScene extends Phaser.Scene {
 
     // Scene 전환에 사용한 입력이 타이틀의 시작 입력으로 이어지지 않게 한다.
     this.time.delayedCall(120, () => {
-      this.input.keyboard?.once('keydown', this.startGame, this);
-      this.input.once('pointerdown', this.startGame, this);
+      this.input.keyboard?.on('keydown', this.startFromKeyboard, this);
+      this.input.on('pointerdown', this.startFromPointer, this);
+    });
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.input.keyboard?.off('keydown', this.startFromKeyboard, this);
+      this.input.off('pointerdown', this.startFromPointer, this);
     });
   }
 
   private drawBackdrop(): void {
-    const graphics = this.add.graphics();
-
-    graphics.fillStyle(0x0a2339, 1);
-    graphics.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-
-    graphics.fillStyle(0x0d2d45, 0.72);
-    graphics.fillCircle(GAME_WIDTH / 2, GAME_HEIGHT * 0.54, 390);
-    graphics.lineStyle(2, 0x285168, 0.48);
-    graphics.strokeCircle(GAME_WIDTH / 2, GAME_HEIGHT * 0.54, 410);
-    graphics.strokeCircle(GAME_WIDTH / 2, GAME_HEIGHT * 0.54, 465);
-
-    graphics.lineStyle(2, 0xf1bd4a, 0.45);
-    graphics.lineBetween(74, 62, GAME_WIDTH - 74, 62);
-    graphics.lineBetween(74, GAME_HEIGHT - 62, GAME_WIDTH - 74, GAME_HEIGHT - 62);
-
-    graphics.fillStyle(0xef5b4c, 0.85);
-    graphics.fillRect(74, 58, 112, 8);
-    graphics.fillRect(GAME_WIDTH - 186, GAME_HEIGHT - 66, 112, 8);
-    graphics.fillStyle(0x5bbbc8, 0.85);
-    graphics.fillRect(GAME_WIDTH - 186, 58, 112, 8);
-    graphics.fillRect(74, GAME_HEIGHT - 66, 112, 8);
-
-    for (let index = 0; index < 34; index += 1) {
-      const x = 70 + ((index * 197) % (GAME_WIDTH - 140));
-      const y = 90 + ((index * 113) % (GAME_HEIGHT - 180));
-      const radius = index % 3 === 0 ? 2 : 1;
-      graphics.fillStyle(0xf7e9c8, index % 2 === 0 ? 0.1 : 0.06);
-      graphics.fillCircle(x, y, radius);
-    }
+    drawNaturalBackdrop(this, GAME_HEIGHT - 62);
   }
 
   private drawTopStats(): void {
@@ -82,7 +65,7 @@ export class TitleScene extends Phaser.Scene {
       .setLetterSpacing(2);
 
     this.add
-      .text(94, 130, bestScore.toString().padStart(6, '0'), {
+      .text(94, 130, bestScore.toString(), {
         fontFamily: FONT_FAMILY,
         fontSize: '38px',
         fontStyle: 'bold',
@@ -101,7 +84,7 @@ export class TitleScene extends Phaser.Scene {
       .setLetterSpacing(2);
 
     this.add
-      .text(GAME_WIDTH - 94, 130, `× ${maxCombo.toString().padStart(3, '0')}`, {
+      .text(GAME_WIDTH - 94, 130, `× ${maxCombo}`, {
         fontFamily: FONT_FAMILY,
         fontSize: '38px',
         fontStyle: 'bold',
@@ -134,9 +117,9 @@ export class TitleScene extends Phaser.Scene {
         fontFamily: FONT_FAMILY,
         fontSize: '126px',
         fontStyle: '900',
-        color: COLORS.cream,
-        stroke: '#ef5b4c',
-        strokeThickness: 5,
+        color: '#fff3d1',
+        stroke: '#315d43',
+        strokeThickness: 8,
         lineSpacing: -32,
       })
       .setOrigin(0.5)
@@ -156,37 +139,10 @@ export class TitleScene extends Phaser.Scene {
   }
 
   private createJegi(x: number, y: number): void {
-    const jegi = this.add.container(x, y).setAngle(10);
-    const graphics = this.add.graphics();
-
-    graphics.fillStyle(COLORS.gold, 1);
-    graphics.fillCircle(0, 0, 25);
-    graphics.lineStyle(5, 0x9b6b1c, 0.85);
-    graphics.strokeCircle(0, 0, 25);
-    graphics.fillStyle(0x342716, 0.72);
-    graphics.fillCircle(0, 0, 8);
-
-    const strips = [
-      { points: [-19, -8, -60, -94, -29, -105, -4, -22], color: COLORS.red },
-      { points: [-8, -20, -18, -124, 14, -130, 10, -22], color: COLORS.sky },
-      { points: [7, -19, 31, -111, 60, -97, 20, -7], color: COLORS.red },
-      { points: [14, -12, 62, -71, 79, -45, 22, 5], color: COLORS.sky },
-    ];
-
-    strips.forEach(({ points, color }) => {
-      graphics.fillStyle(color, 0.96);
-      graphics.fillPoints(
-        [
-          new Phaser.Math.Vector2(points[0], points[1]),
-          new Phaser.Math.Vector2(points[2], points[3]),
-          new Phaser.Math.Vector2(points[4], points[5]),
-          new Phaser.Math.Vector2(points[6], points[7]),
-        ],
-        true,
-      );
-    });
-
-    jegi.add(graphics);
+    const jegi = this.add.image(x, y, 'jegi-real')
+      .setOrigin(0.5, 0.86)
+      .setDisplaySize(160, 240)
+      .setAngle(8);
     this.tweens.add({
       targets: jegi,
       y: y - 18,
@@ -206,8 +162,8 @@ export class TitleScene extends Phaser.Scene {
         fontFamily: FONT_FAMILY,
         fontSize: '27px',
         fontStyle: 'bold',
-        color: COLORS.cream,
-        backgroundColor: '#123c58',
+        color: '#fff3d1',
+        backgroundColor: '#315d43',
         padding: { x: 34, y: 17 },
       })
       .setOrigin(0.5)
@@ -231,7 +187,24 @@ export class TitleScene extends Phaser.Scene {
     this.isStarting = true;
     this.cameras.main.fadeOut(280, 7, 27, 47);
     this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-      this.scene.start('GameScene');
+      const nextScene = shouldShowTutorial(localStorage.getItem(TUTORIAL_SEEN_KEY))
+        ? 'TutorialScene'
+        : 'GameScene';
+      this.scene.start(nextScene);
     });
+  }
+
+  private startFromKeyboard(event: KeyboardEvent): void {
+    if (!isConfirmKey(event)) {
+      return;
+    }
+    this.startGame();
+  }
+
+  private startFromPointer(pointer: Phaser.Input.Pointer): void {
+    if (!pointer.wasTouch) {
+      return;
+    }
+    this.startGame();
   }
 }

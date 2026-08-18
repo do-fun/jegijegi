@@ -1,6 +1,6 @@
 :root {
   color: #f7e9c8;
-  background: #03101d;
+  background: #8fc5d0;
   font-family: Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -23,21 +23,16 @@ body {
   min-width: 320px;
   min-height: 100dvh;
   background:
-    radial-gradient(circle at 50% 42%, rgba(31, 74, 100, 0.42), transparent 52%),
-    #03101d;
+    linear-gradient(180deg, #9fd3df 0%, #dcebd5 58%, #9a7449 100%);
   overscroll-behavior: none;
   touch-action: none;
   user-select: none;
 }
 
 #game {
-  display: grid;
-  place-items: center;
+  display: block;
 }
 
 canvas {
   display: block;
-  max-width: 100%;
-  max-height: 100%;
-  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.38);
 }
