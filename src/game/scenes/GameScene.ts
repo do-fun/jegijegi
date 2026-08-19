@@ -61,8 +61,6 @@ const FLIGHT_HEIGHT = 390;
 const GROUND_Y = 760;
 const STAGE_SECONDS = 20;
 const HOLD_PENALTY_SECONDS = 5;
-// 10스테이지 전체 플레이 검증이 끝나면 false로 되돌린다.
-const DISABLE_LIFE_LOSS_FOR_PLAYTEST = true;
 const RESULT_INPUT_DELAY = 0.2;
 const PERFECT_HIT_STOP = 0.04;
 const ANGLE_STEP_SPEED = 185;
@@ -253,10 +251,7 @@ export class GameScene extends Phaser.Scene {
           this.loseLife();
           playAudio(this, AUDIO.miss, { volume: 0.55 });
           if (this.lives <= 0) return;
-          this.showFeedback(
-            DISABLE_LIFE_LOSS_FOR_PLAYTEST ? '대기 시간 초과\nLIFE 유지' : '대기 시간 초과\nLIFE -1',
-            'miss',
-          );
+          this.showFeedback('대기 시간 초과\nLIFE -1', 'miss');
         }
       }
 
@@ -754,12 +749,11 @@ export class GameScene extends Phaser.Scene {
     this.loseLife();
     if (this.lives > 0) {
       this.inputManager.requireFreshKick();
-      this.showFeedback(DISABLE_LIFE_LOSS_FOR_PLAYTEST ? 'LIFE 유지' : 'LIFE -1', 'miss');
+      this.showFeedback('LIFE -1', 'miss');
     }
   }
 
   private loseLife(): void {
-    if (DISABLE_LIFE_LOSS_FOR_PLAYTEST) return;
     this.lives -= 1;
     this.saveRecords();
     if (this.lives <= 0) this.endGame('GAME OVER');
@@ -777,7 +771,7 @@ export class GameScene extends Phaser.Scene {
     const result = resolveStageTimeout(
       this.stageSuccesses,
       STAGE_TARGETS[this.stage - 1],
-      DISABLE_LIFE_LOSS_FOR_PLAYTEST ? Math.max(1, this.lives) : this.lives,
+      this.lives,
     );
 
     if (result === 'clear') {
@@ -785,7 +779,7 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    if (!DISABLE_LIFE_LOSS_FOR_PLAYTEST) this.lives -= 1;
+    this.lives -= 1;
     this.scoreState.combo = 0;
     this.scoreState.consecutivePerfects = 0;
     this.saveRecords();
@@ -1176,9 +1170,7 @@ export class GameScene extends Phaser.Scene {
   private updateHud(): void {
     this.scoreText.setText(this.scoreState.score.toString());
     this.comboText.setText(`× ${this.scoreState.combo}`);
-    this.livesText.setText(
-      DISABLE_LIFE_LOSS_FOR_PLAYTEST ? '∞' : '♥'.repeat(Math.max(0, this.lives)),
-    );
+    this.livesText.setText('♥'.repeat(Math.max(0, this.lives)));
     this.stageText.setText(`${this.stage} / 10`);
     this.targetText.setText(`${this.stageSuccesses} / ${STAGE_TARGETS[this.stage - 1]}`);
     this.timerText.setText(`${Math.ceil(this.stageTime).toString().padStart(2, '0')}초`)
@@ -1196,11 +1188,7 @@ export class GameScene extends Phaser.Scene {
       this.heldPrompt.setText('SPACE로 제기를 서브하세요').setVisible(true);
     } else if (this.state === 'held') {
       const remaining = Math.max(0, Math.ceil(HOLD_PENALTY_SECONDS - this.holdTime));
-      this.heldPrompt.setText(
-        DISABLE_LIFE_LOSS_FOR_PLAYTEST
-          ? `SPACE로 재개  ·  테스트 모드 LIFE 유지 (${remaining}초)`
-          : `SPACE로 재개  ·  ${remaining}초 후 LIFE -1`,
-      ).setVisible(true);
+      this.heldPrompt.setText(`SPACE로 재개  ·  ${remaining}초 후 LIFE -1`).setVisible(true);
     } else {
       this.heldPrompt.setVisible(false);
     }
