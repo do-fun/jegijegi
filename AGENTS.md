@@ -31,7 +31,7 @@ React, 별도 백엔드, 데이터베이스와 추가 물리 엔진은 명확한
 - Test: `npm test`
 - Build: `npm run build`
 - Preview production build: `npm run preview`
-- Deploy to Cloudflare: Cloudflare 설정이 추가된 뒤 `npm run deploy`
+- Deploy to Cloudflare: `npm run deploy`
 
 명령이 추가되거나 변경되면 `package.json`과 이 문서를 함께 갱신한다.
 

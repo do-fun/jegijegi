@@ -8,7 +8,8 @@
     "build": "npm run typecheck && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "deploy": "npm run build && wrangler pages deploy dist --project-name jegijegi --branch main"
   },
   "dependencies": {
     "phaser": "^4.2.1"
@@ -16,6 +17,7 @@
   "devDependencies": {
     "typescript": "^7.0.2",
     "vite": "^8.2.1",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "wrangler": "^4.124.0"
   }
 }
