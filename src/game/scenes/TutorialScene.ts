@@ -4,6 +4,7 @@ import { isConfirmKey } from '../inputKeys';
 import { TUTORIAL_SEEN_KEY } from '../progress';
 import { drawNaturalBackdrop } from '../naturalBackdrop';
 import { configureResponsiveCamera } from '../responsiveCamera';
+import { initializeAudio, preloadAudio, startMusic, toggleMuted } from '../audio';
 
 const FONT = 'Pretendard, Apple SD Gothic Neo, Noto Sans KR, sans-serif';
 
@@ -16,6 +17,7 @@ export class TutorialScene extends Phaser.Scene {
   }
 
   preload(): void {
+    preloadAudio(this);
     if (!this.textures.exists('player-kick')) {
       this.load.spritesheet('player-kick', '/assets/characters/player-sprite-v4.png', {
         frameWidth: 384,
@@ -30,7 +32,9 @@ export class TutorialScene extends Phaser.Scene {
   create(): void {
     this.ready = false;
     this.leaving = false;
-    localStorage.setItem(TUTORIAL_SEEN_KEY, 'true');
+    initializeAudio(this);
+    startMusic(this);
+    sessionStorage.setItem(TUTORIAL_SEEN_KEY, 'true');
     configureResponsiveCamera(this);
     this.cameras.main.setBackgroundColor(0xaedbe8);
 
@@ -180,6 +184,10 @@ export class TutorialScene extends Phaser.Scene {
 
   private startGame(event: KeyboardEvent): void {
     if (!this.ready || this.leaving || event.repeat) return;
+    if (event.code === 'KeyM') {
+      toggleMuted(this);
+      return;
+    }
     if (event.code === 'Escape') {
       this.leaving = true;
       this.scene.start('TitleScene');

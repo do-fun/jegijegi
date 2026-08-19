@@ -26,6 +26,23 @@ import {
   PERFECT_BOOST_SECONDS,
 } from '../powerup';
 import { InputManager } from '../systems/InputManager';
+import {
+  createStagePerformances,
+  recordStageHit,
+  summarizePerformances,
+  type StagePerformance,
+} from '../resultStats';
+import {
+  AUDIO,
+  initializeAudio,
+  playAudio,
+  preloadAudio,
+  setMusicVolume,
+  startMusic,
+  stopAmbience,
+  syncAmbience,
+  toggleMuted,
+} from '../audio';
 
 const FONT = 'Pretendard, Apple SD Gothic Neo, Noto Sans KR, sans-serif';
 const PLAYER_Y = 770;
@@ -46,7 +63,7 @@ const STAGE_SECONDS = 20;
 const HOLD_PENALTY_SECONDS = 5;
 // 10스테이지 전체 플레이 검증이 끝나면 false로 되돌린다.
 const DISABLE_LIFE_LOSS_FOR_PLAYTEST = true;
-const RESULT_SECONDS = 1.15;
+const RESULT_INPUT_DELAY = 0.2;
 const PERFECT_HIT_STOP = 0.04;
 const ANGLE_STEP_SPEED = 185;
 const WIND_VELOCITY_CHANGE = 80;
@@ -95,9 +112,7 @@ export class GameScene extends Phaser.Scene {
   private stage = 1;
   private stageTime = STAGE_SECONDS;
   private stageSuccesses = 0;
-  private totalSuccesses = 0;
-  private goodCount = 0;
-  private perfectCount = 0;
+  private stagePerformances: StagePerformance[] = createStagePerformances(STAGE_TARGETS.length);
   private stageStarted = false;
   private holdTime = 0;
   private lives = 2;
@@ -115,6 +130,7 @@ export class GameScene extends Phaser.Scene {
   private luckyPouchSpawnRemaining = 0;
   private luckyPouchCollectedThisStage = false;
   private perfectBoostRemaining = 0;
+  private timeWarningPlayed = false;
   private playerSprite!: Phaser.GameObjects.Sprite;
   private jegiSprite!: Phaser.GameObjects.Image;
   private kickTargetGraphics!: Phaser.GameObjects.Graphics;
@@ -127,7 +143,8 @@ export class GameScene extends Phaser.Scene {
   private stageText!: Phaser.GameObjects.Text;
   private targetText!: Phaser.GameObjects.Text;
   private timerText!: Phaser.GameObjects.Text;
-  private muteText!: Phaser.GameObjects.Text;
+  private muteButton!: Phaser.GameObjects.Container;
+  private muteIconGraphics!: Phaser.GameObjects.Graphics;
   private weatherText!: Phaser.GameObjects.Text;
   private perfectBoostText!: Phaser.GameObjects.Text;
   private heldPrompt!: Phaser.GameObjects.Text;
@@ -135,6 +152,7 @@ export class GameScene extends Phaser.Scene {
   private overlayShade!: Phaser.GameObjects.Rectangle;
   private overlayTitle!: Phaser.GameObjects.Text;
   private overlayBody!: Phaser.GameObjects.Text;
+  private overlayDetails: Phaser.GameObjects.GameObject[] = [];
   private pauseShade!: Phaser.GameObjects.Rectangle;
   private pauseText!: Phaser.GameObjects.Text;
 
@@ -143,6 +161,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   preload(): void {
+    preloadAudio(this);
     if (!this.textures.exists('player-kick')) {
       this.load.spritesheet('player-kick', '/assets/characters/player-sprite-v4.png', {
         frameWidth: 384,
@@ -162,6 +181,9 @@ export class GameScene extends Phaser.Scene {
 
   create(): void {
     this.resetRun();
+    initializeAudio(this);
+    startMusic(this);
+    setMusicVolume(this, 0.25);
     configureResponsiveCamera(this);
     this.inputManager = new InputManager(this);
     this.cameras.main.setBackgroundColor(0xaedbe8);
@@ -170,9 +192,11 @@ export class GameScene extends Phaser.Scene {
     this.createHud();
     this.createActors();
     this.createOverlays();
+    this.muteButton.on('pointerdown', this.toggleMute, this);
     this.renderAll();
 
     this.input.keyboard?.on('keydown', this.handleGlobalKey, this);
+    this.input.on('pointerdown', this.handleStageResultPointer, this);
     window.addEventListener('blur', this.pauseFromEnvironment);
     window.addEventListener('focus', this.resumeFromEnvironment);
     document.addEventListener('visibilitychange', this.handleVisibilityChange);
@@ -192,13 +216,16 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (this.state === 'stage-result') {
-      this.resultRemaining -= delta;
-      if (this.resultRemaining <= 0) this.finishStageResult();
+      this.resultRemaining = Math.max(0, this.resultRemaining - delta);
       return;
     }
 
     if (this.stageStarted) {
       this.stageTime = Math.max(0, this.stageTime - delta);
+      if (this.stageTime <= 5 && !this.timeWarningPlayed) {
+        this.timeWarningPlayed = true;
+        playAudio(this, AUDIO.warning, { volume: 0.58 });
+      }
       if (this.stageTime <= 0) {
         this.resolveTimeout();
         return;
@@ -224,6 +251,7 @@ export class GameScene extends Phaser.Scene {
         if (this.holdTime >= HOLD_PENALTY_SECONDS) {
           this.holdTime -= HOLD_PENALTY_SECONDS;
           this.loseLife();
+          playAudio(this, AUDIO.miss, { volume: 0.55 });
           if (this.lives <= 0) return;
           this.showFeedback(
             DISABLE_LIFE_LOSS_FOR_PLAYTEST ? '대기 시간 초과\nLIFE 유지' : '대기 시간 초과\nLIFE -1',
@@ -259,9 +287,7 @@ export class GameScene extends Phaser.Scene {
     this.stage = 1;
     this.stageTime = STAGE_SECONDS;
     this.stageSuccesses = 0;
-    this.totalSuccesses = 0;
-    this.goodCount = 0;
-    this.perfectCount = 0;
+    this.stagePerformances = createStagePerformances(STAGE_TARGETS.length);
     this.stageStarted = false;
     this.holdTime = 0;
     this.lives = 2;
@@ -276,6 +302,7 @@ export class GameScene extends Phaser.Scene {
     this.luckyPouchSpawnRemaining = getLuckyPouchSpawnDelay(Math.random());
     this.luckyPouchCollectedThisStage = false;
     this.perfectBoostRemaining = 0;
+    this.timeWarningPlayed = false;
     this.configureEnvironment();
   }
 
@@ -324,7 +351,10 @@ export class GameScene extends Phaser.Scene {
     this.stageText = this.add.text(726, 43, '', { ...valueStyle, color: '#b9c8ff' });
     this.targetText = this.add.text(950, 43, '', { ...valueStyle, color: '#5ee7f0' });
     this.timerText = this.add.text(1182, 43, '', { ...valueStyle, color: '#f7e9c8' });
-    this.muteText = this.add.text(1314, 43, '', { ...valueStyle, fontSize: '24px', color: '#f1bd4a' });
+    this.muteIconGraphics = this.add.graphics();
+    this.muteButton = this.add.container(1308, 49, [this.muteIconGraphics])
+      .setSize(48, 48)
+      .setInteractive({ useHandCursor: true });
     this.weatherText = this.add.text(GAME_WIDTH / 2, 110, '', {
       ...labelStyle,
       fontSize: '20px',
@@ -413,6 +443,7 @@ export class GameScene extends Phaser.Scene {
     this.holdTime = 0;
     this.kickActive = false;
     this.kickConnected = false;
+    playAudio(this, AUDIO.kick, { volume: 0.34 });
     const heldPoint = this.getHeldJegiPoint();
     this.launchFlight(0, 'serve', heldPoint.x, heldPoint.y);
     this.inputManager.requireFreshKick();
@@ -422,6 +453,7 @@ export class GameScene extends Phaser.Scene {
     this.kickActive = true;
     this.kickConnected = false;
     this.kickElapsed = 0;
+    playAudio(this, AUDIO.kick, { volume: 0.34 });
   }
 
   private updateKick(delta: number): void {
@@ -449,14 +481,23 @@ export class GameScene extends Phaser.Scene {
     this.scoreState = result;
     this.pendingInsectBonus = 0;
     this.stageSuccesses += 1;
-    this.totalSuccesses += 1;
-    if (grade === 'perfect') this.perfectCount += 1;
-    else this.goodCount += 1;
+    const stageIndex = this.stage - 1;
+    this.stagePerformances[stageIndex] = recordStageHit(
+      this.stagePerformances[stageIndex],
+      grade,
+      result.consecutivePerfects,
+    );
     this.kickConnected = true;
     const direction = grade === 'good' ? (Math.random() < 0.5 ? -1 : 1) : 0;
     this.launchFlight(direction, grade, x, y);
     this.showFeedback(`${grade === 'perfect' ? 'PERFECT' : 'GOOD'}\n+${result.gained}`, grade);
-    if (grade === 'perfect') this.hitStopRemaining = PERFECT_HIT_STOP;
+    if (grade === 'perfect') {
+      const rate = 1 + Math.min(6, Math.max(0, result.consecutivePerfects - 1)) * 0.045;
+      playAudio(this, AUDIO.perfect, { volume: 0.54, rate });
+      this.hitStopRemaining = PERFECT_HIT_STOP;
+    } else {
+      playAudio(this, AUDIO.good, { volume: 0.48 });
+    }
   }
 
   private launchFlight(direction: -1 | 0 | 1, grade: HitGrade | 'serve', x?: number, y?: number): void {
@@ -509,9 +550,11 @@ export class GameScene extends Phaser.Scene {
     if (this.flight.x <= flightBounds.min) {
       this.flight.x = flightBounds.min;
       this.flight.horizontalVelocity = Math.abs(this.flight.horizontalVelocity);
+      playAudio(this, AUDIO.bounce, { volume: 0.38 });
     } else if (this.flight.x >= flightBounds.max) {
       this.flight.x = flightBounds.max;
       this.flight.horizontalVelocity = -Math.abs(this.flight.horizontalVelocity);
+      playAudio(this, AUDIO.bounce, { volume: 0.38 });
     }
     const point = this.getJegiPoint();
     if (point.y >= GROUND_Y) this.handleFloorFailure();
@@ -640,6 +683,7 @@ export class GameScene extends Phaser.Scene {
       this.luckyPouchSpawnRemaining = getLuckyPouchSpawnDelay(Math.random());
       this.luckyPouchCollectedThisStage = true;
       this.perfectBoostRemaining = PERFECT_BOOST_SECONDS;
+      playAudio(this, AUDIO.pouch, { volume: 0.65 });
       this.showFeedback('복주머니 획득\nPERFECT 5초', 'perfect');
       return;
     }
@@ -688,10 +732,12 @@ export class GameScene extends Phaser.Scene {
       MAX_HORIZONTAL_SPEED,
     );
     this.pendingInsectBonus = Math.min(150, this.pendingInsectBonus + 50);
+    playAudio(this, AUDIO.flyHit, { volume: 0.48 });
     this.showFeedback(`FLY +${this.pendingInsectBonus}`, 'good');
   }
 
   private handleFloorFailure(): void {
+    playAudio(this, AUDIO.miss, { volume: 0.66 });
     this.flight = null;
     this.luckyPouch = null;
     this.luckyPouchSpawnRemaining = getLuckyPouchSpawnDelay(Math.random());
@@ -753,34 +799,55 @@ export class GameScene extends Phaser.Scene {
   private showStageResult(kind: StageResultKind): void {
     this.state = 'stage-result';
     this.stageResultKind = kind;
-    this.resultRemaining = RESULT_SECONDS;
+    this.resultRemaining = RESULT_INPUT_DELAY;
+    stopAmbience(this);
+    playAudio(this, kind === 'clear' ? AUDIO.clear : AUDIO.miss, { volume: kind === 'clear' ? 0.68 : 0.58 });
     this.overlayShade.setVisible(true);
-    this.overlayTitle.setText(kind === 'clear' ? 'STAGE CLEAR' : 'STAGE RETRY').setVisible(true);
-    this.overlayBody.setText(
-      kind === 'clear'
-        ? `KICK ${this.stageSuccesses}  /  ${STAGE_TARGETS[this.stage - 1]}`
-        : `목표 ${STAGE_TARGETS[this.stage - 1]}  ·  기록 ${this.stageSuccesses}\n${DISABLE_LIFE_LOSS_FOR_PLAYTEST ? '테스트 모드 · 생명 유지' : '생명 -1'}`,
-    ).setVisible(true);
+    this.overlayTitle
+      .setPosition(GAME_WIDTH / 2, 120)
+      .setFontSize(58)
+      .setText(kind === 'clear' ? 'STAGE CLEAR' : 'STAGE RETRY')
+      .setVisible(true);
+    this.overlayBody.setVisible(false);
+    const totals = summarizePerformances(this.stagePerformances.slice(0, this.stage));
+    this.createPerformanceTable(this.stage, [
+      {
+        label: '차기 성공 / 목표',
+        value: `${this.stageSuccesses} / ${STAGE_TARGETS[this.stage - 1]}`,
+        color: '#f1bd4a',
+      },
+      { label: '현재 점수', value: this.scoreState.score.toString(), color: '#fff3d1' },
+      { label: '전체 GOOD', value: totals.goodCount.toString(), color: '#f1bd4a' },
+      { label: '전체 PERFECT', value: totals.perfectCount.toString(), color: '#5ee7f0' },
+    ], '아무 버튼이나 눌러 계속');
   }
 
   private finishStageResult(): void {
     this.overlayShade.setVisible(false);
     this.overlayTitle.setVisible(false);
     this.overlayBody.setVisible(false);
+    this.clearOverlayDetails();
 
     if (this.stageResultKind === 'clear') {
       if (this.stage >= STAGE_TARGETS.length) {
         this.completeRun();
         return;
       }
-      if ([3, 6, 9].includes(this.stage)) this.lives = Math.min(3, this.lives + 1);
+      if ([3, 6, 9].includes(this.stage)) {
+        this.lives = Math.min(3, this.lives + 1);
+        playAudio(this, AUDIO.reward, { volume: 0.62 });
+      }
+      this.scoreState.combo = 0;
+      this.scoreState.consecutivePerfects = 0;
       this.stage += 1;
       this.configureEnvironment();
+      if ([3, 5, 6, 7, 9].includes(this.stage)) playAudio(this, AUDIO.obstacle, { volume: 0.48 });
     }
 
     this.stageTime = STAGE_SECONDS;
     this.stageSuccesses = 0;
     this.stageStarted = false;
+    this.timeWarningPlayed = false;
     this.holdTime = 0;
     this.state = 'held';
     this.flight = null;
@@ -795,15 +862,14 @@ export class GameScene extends Phaser.Scene {
   }
 
   private completeRun(): void {
+    stopAmbience(this);
     this.saveStageRecord();
     this.saveRecords();
     this.scene.start('ResultScene', {
       score: this.scoreState.score,
       bestScore: this.readNumber('jegijegi.bestScore'),
-      totalSuccesses: this.totalSuccesses,
-      goodCount: this.goodCount,
-      perfectCount: this.perfectCount,
       maxCombo: this.scoreState.maxCombo,
+      stagePerformances: this.stagePerformances,
     });
   }
 
@@ -814,16 +880,106 @@ export class GameScene extends Phaser.Scene {
     this.kickConnected = false;
     this.luckyPouch = null;
     this.perfectBoostRemaining = 0;
+    stopAmbience(this);
+    setMusicVolume(this, 0.1);
+    playAudio(this, AUDIO.gameOver, { volume: 0.68 });
     this.pauseShade.setVisible(false);
     this.pauseText.setVisible(false);
     this.saveStageRecord();
     this.saveRecords();
     const best = this.readNumber('jegijegi.bestScore');
+    const totals = summarizePerformances(this.stagePerformances.slice(0, this.stage));
     this.overlayShade.setVisible(true);
-    this.overlayTitle.setText(title).setVisible(true);
-    this.overlayBody.setText(
-      `점수 ${this.scoreState.score}  ·  최고 ${best}\n스테이지 ${this.stage}  ·  최대 콤보 ${this.scoreState.maxCombo}\n\n아무 키나 누르면 재시작`,
-    ).setVisible(true);
+    this.overlayTitle.setPosition(GAME_WIDTH / 2, 115).setFontSize(62).setText(title).setVisible(true);
+    this.overlayBody.setVisible(false);
+    this.createPerformanceTable(this.stage, [
+      { label: '이번 점수', value: this.scoreState.score.toString(), color: '#f1bd4a' },
+      { label: '최고 점수', value: best.toString(), color: '#fff3d1' },
+      { label: '최대 콤보', value: `× ${this.scoreState.maxCombo}`, color: '#ef7468' },
+      {
+        label: '전체 GOOD / PERFECT',
+        value: `${totals.goodCount} / ${totals.perfectCount}`,
+        color: '#5ee7f0',
+      },
+    ], '아무 키나 누르면 재시작');
+  }
+
+  private createPerformanceTable(
+    lastStage: number,
+    summaries: ReadonlyArray<{ label: string; value: string; color: string }>,
+    prompt: string,
+  ): void {
+    this.clearOverlayDetails();
+    const performances = this.stagePerformances.slice(0, lastStage);
+    const tableX = 320;
+    const tableWidth = 800;
+    const tableTop = Math.max(300, 400 - lastStage * 10);
+    const rowHeight = 34;
+    const graphics = this.add.graphics().setDepth(21);
+    this.overlayDetails.push(graphics);
+
+    const addText = (
+      x: number,
+      y: number,
+      text: string,
+      fontSize: number,
+      color: string,
+      fontStyle = 'normal',
+    ): Phaser.GameObjects.Text => {
+      const object = this.add.text(x, y, text, {
+        fontFamily: FONT,
+        fontSize: `${fontSize}px`,
+        fontStyle,
+        color,
+      }).setOrigin(0.5).setDepth(22);
+      this.overlayDetails.push(object);
+      return object;
+    };
+
+    const cardWidth = 190;
+    summaries.forEach((summary, index) => {
+      const x = tableX + 100 + index * 200;
+      const y = tableTop - 66;
+      graphics.fillStyle(0x173e43, 0.96).fillRoundedRect(x - cardWidth / 2, y - 34, cardWidth, 68, 10);
+      graphics.lineStyle(2, 0x4e7a6a, 0.9).strokeRoundedRect(x - cardWidth / 2, y - 34, cardWidth, 68, 10);
+      addText(x, y - 15, summary.label, 13, '#9eb3a9', 'bold');
+      addText(x, y + 13, summary.value, 22, summary.color, 'bold');
+    });
+
+    graphics.fillStyle(0x315d43, 1).fillRoundedRect(tableX, tableTop, tableWidth, 38, 8);
+    const columns = [
+      { x: 382, label: 'STAGE' },
+      { x: 560, label: 'GOOD' },
+      { x: 750, label: 'PERFECT' },
+      { x: 990, label: '최대 연속 PERFECT' },
+    ];
+    columns.forEach((column) => addText(column.x, tableTop + 19, column.label, 15, '#fff3d1', 'bold'));
+
+    performances.forEach((performance, index) => {
+      const y = tableTop + 38 + index * rowHeight;
+      graphics.fillStyle(index % 2 === 0 ? 0x173e43 : 0x244f46, 0.94)
+        .fillRoundedRect(tableX, y, tableWidth, rowHeight - 2, 5);
+      addText(columns[0].x, y + 16, `${index + 1}`, 17, '#fff3d1', 'bold');
+      addText(columns[1].x, y + 16, `${performance.goodCount}`, 17, '#f1bd4a');
+      addText(columns[2].x, y + 16, `${performance.perfectCount}`, 17, '#5ee7f0');
+      addText(columns[3].x, y + 16, `× ${performance.maxConsecutivePerfects}`, 17, '#ef7468', 'bold');
+    });
+
+    const tableBottom = tableTop + 38 + performances.length * rowHeight;
+    graphics.lineStyle(2, 0x4e7a6a, 0.8).strokeRoundedRect(
+      tableX,
+      tableTop,
+      tableWidth,
+      tableBottom - tableTop,
+      8,
+    );
+    const promptText = addText(GAME_WIDTH / 2, Math.min(770, tableBottom + 46), prompt, 22, '#fff3d1', 'bold');
+    promptText.setBackgroundColor('#315d43').setPadding(24, 10, 24, 10);
+  }
+
+  private clearOverlayDetails(): void {
+    this.overlayDetails.forEach((object) => object.destroy());
+    this.overlayDetails = [];
   }
 
   private handleGlobalKey(event: KeyboardEvent): void {
@@ -832,14 +988,42 @@ export class GameScene extends Phaser.Scene {
       this.scene.start('TitleScene');
       return;
     }
+    if (this.state === 'stage-result') {
+      if (this.resultRemaining <= 0 && isConfirmKey(event)) this.finishStageResult();
+      return;
+    }
     if (this.state !== 'ended' || !isConfirmKey(event)) return;
     this.scene.restart();
   }
 
+  private handleStageResultPointer(pointer: Phaser.Input.Pointer): void {
+    if (
+      this.state !== 'stage-result'
+      || this.externalPaused
+      || this.resultRemaining > 0
+      || this.muteButton.getBounds().contains(pointer.worldX, pointer.worldY)
+    ) return;
+    this.finishStageResult();
+  }
+
   private toggleMute(): void {
-    this.muted = !this.muted;
-    localStorage.setItem('jegijegi.muted', String(this.muted));
-    this.muteText.setText(this.muted ? '🔇' : '🔊');
+    this.muted = toggleMuted(this);
+    this.drawMuteIcon();
+  }
+
+  private drawMuteIcon(): void {
+    const graphics = this.muteIconGraphics.clear();
+    const color = this.muted ? 0xef7468 : 0xf1bd4a;
+    graphics.fillStyle(color, 1).fillRect(-16, -5, 7, 10);
+    graphics.fillTriangle(-9, -5, 2, -13, 2, 13);
+    graphics.lineStyle(2.5, color, 1);
+    if (this.muted) {
+      graphics.lineBetween(8, -8, 20, 8);
+      graphics.lineBetween(20, -8, 8, 8);
+    } else {
+      graphics.beginPath().arc(1, 0, 10, -0.72, 0.72).strokePath();
+      graphics.beginPath().arc(1, 0, 17, -0.72, 0.72).strokePath();
+    }
   }
 
   private showFeedback(message: string, grade: HitGrade | 'miss'): void {
@@ -868,6 +1052,21 @@ export class GameScene extends Phaser.Scene {
     this.drawJegi();
     this.drawKickTarget();
     this.updateHud();
+    this.updateAmbience();
+  }
+
+  private updateAmbience(): void {
+    if (this.externalPaused || this.state === 'stage-result' || this.state === 'ended') return;
+    const nearestFlyDistance = this.flies.length === 0
+      ? Number.POSITIVE_INFINITY
+      : Math.min(...this.flies.map((fly) => Phaser.Math.Distance.Between(this.playerX, PLAYER_Y, fly.x, fly.y)));
+    const flyVolume = Phaser.Math.Linear(0.025, 0.075, Phaser.Math.Clamp(1 - nearestFlyDistance / 850, 0, 1));
+    syncAmbience(this, {
+      flies: this.flies.length > 0,
+      rain: hasRain(this.environment.weather),
+      wind: hasWind(this.environment.weather),
+      flyVolume,
+    });
   }
 
   private drawLuckyPouch(): void {
@@ -984,7 +1183,7 @@ export class GameScene extends Phaser.Scene {
     this.targetText.setText(`${this.stageSuccesses} / ${STAGE_TARGETS[this.stage - 1]}`);
     this.timerText.setText(`${Math.ceil(this.stageTime).toString().padStart(2, '0')}초`)
       .setColor(this.stageTime <= 5 && this.stageStarted ? '#ef5b4c' : '#f7e9c8');
-    this.muteText.setText(this.muted ? '🔇' : '🔊');
+    this.drawMuteIcon();
     const weatherLabel = hasWind(this.environment.weather)
       ? (this.environment.windDirection < 0 ? '← 바람' : '바람 →')
       : '';
@@ -1034,6 +1233,7 @@ export class GameScene extends Phaser.Scene {
     if (this.externalPaused) return;
     this.externalPaused = true;
     this.inputManager.reset();
+    this.sound.pauseAll();
     const showPauseMessage = this.state !== 'stage-result' && this.state !== 'ended';
     this.pauseShade.setVisible(showPauseMessage);
     this.pauseText.setVisible(showPauseMessage);
@@ -1043,6 +1243,7 @@ export class GameScene extends Phaser.Scene {
     if (document.hidden) return;
     this.externalPaused = false;
     this.inputManager.reset();
+    this.sound.resumeAll();
     this.pauseShade.setVisible(false);
     this.pauseText.setVisible(false);
   };
@@ -1053,7 +1254,9 @@ export class GameScene extends Phaser.Scene {
   };
 
   private cleanup(): void {
+    stopAmbience(this);
     this.input.keyboard?.off('keydown', this.handleGlobalKey, this);
+    this.input.off('pointerdown', this.handleStageResultPointer, this);
     window.removeEventListener('blur', this.pauseFromEnvironment);
     window.removeEventListener('focus', this.resumeFromEnvironment);
     document.removeEventListener('visibilitychange', this.handleVisibilityChange);

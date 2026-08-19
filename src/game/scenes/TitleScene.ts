@@ -1,9 +1,10 @@
 import Phaser from 'phaser';
 import { GAME_HEIGHT, GAME_WIDTH } from '../dimensions';
 import { isConfirmKey } from '../inputKeys';
-import { shouldShowTutorial, TUTORIAL_SEEN_KEY } from '../progress';
+import { clearStoredRecords, shouldShowTutorial, TUTORIAL_SEEN_KEY } from '../progress';
 import { drawNaturalBackdrop } from '../naturalBackdrop';
 import { configureResponsiveCamera } from '../responsiveCamera';
+import { AUDIO, initializeAudio, playAudio, preloadAudio, setMusicVolume, startMusic } from '../audio';
 
 const COLORS = {
   navy: 0xaedbe8,
@@ -15,12 +16,19 @@ const FONT_FAMILY = 'Pretendard, Apple SD Gothic Neo, Noto Sans KR, sans-serif';
 
 export class TitleScene extends Phaser.Scene {
   private isStarting = false;
+  private resetArmed = false;
+  private bestScoreText!: Phaser.GameObjects.Text;
+  private maxComboText!: Phaser.GameObjects.Text;
+  private resetButton!: Phaser.GameObjects.Arc;
+  private resetHintText!: Phaser.GameObjects.Text;
+  private resetTimer?: Phaser.Time.TimerEvent;
 
   constructor() {
     super('TitleScene');
   }
 
   preload(): void {
+    preloadAudio(this);
     if (!this.textures.exists('jegi-real')) {
       this.load.image('jegi-real', '/assets/items/jegi-real.png');
     }
@@ -29,12 +37,17 @@ export class TitleScene extends Phaser.Scene {
   create(): void {
     // Phaser는 Scene 인스턴스를 재사용하므로 재진입할 때 시작 잠금을 초기화한다.
     this.isStarting = false;
+    this.resetArmed = false;
+    this.resetTimer = undefined;
+    initializeAudio(this);
+    setMusicVolume(this, 0.25);
     configureResponsiveCamera(this);
     this.cameras.main.setBackgroundColor(COLORS.navy);
     this.drawBackdrop();
     this.drawTopStats();
     this.drawLogo();
     this.drawStartPrompt();
+    this.drawResetButton();
 
     // Scene 전환에 사용한 입력이 타이틀의 시작 입력으로 이어지지 않게 한다.
     this.time.delayedCall(120, () => {
@@ -64,7 +77,7 @@ export class TitleScene extends Phaser.Scene {
       })
       .setLetterSpacing(2);
 
-    this.add
+    this.bestScoreText = this.add
       .text(94, 130, bestScore.toString(), {
         fontFamily: FONT_FAMILY,
         fontSize: '38px',
@@ -83,7 +96,7 @@ export class TitleScene extends Phaser.Scene {
       .setOrigin(1, 0)
       .setLetterSpacing(2);
 
-    this.add
+    this.maxComboText = this.add
       .text(GAME_WIDTH - 94, 130, `× ${maxCombo}`, {
         fontFamily: FONT_FAMILY,
         fontSize: '38px',
@@ -179,15 +192,90 @@ export class TitleScene extends Phaser.Scene {
     });
   }
 
+  private drawResetButton(): void {
+    const buttonX = GAME_WIDTH / 2 - 176;
+    const buttonY = 774;
+    const bubbleX = buttonX + 34;
+    const bubbleWidth = 320;
+    const bubbleHeight = 50;
+    const graphics = this.add.graphics();
+    graphics.fillStyle(0xfff3d1, 0.94).fillRoundedRect(bubbleX, buttonY - bubbleHeight / 2, bubbleWidth, bubbleHeight, 12);
+    graphics.lineStyle(2, 0x315d43, 0.75).strokeRoundedRect(bubbleX, buttonY - bubbleHeight / 2, bubbleWidth, bubbleHeight, 12);
+    graphics.fillStyle(0xfff3d1, 0.94).fillTriangle(bubbleX, buttonY - 8, bubbleX - 12, buttonY, bubbleX, buttonY + 8);
+
+    this.resetButton = this.add
+      .circle(buttonX - 18, buttonY, 23, 0x315d43)
+      .setStrokeStyle(3, 0xfff3d1, 0.9)
+      .setInteractive({ useHandCursor: true });
+
+    this.add.text(buttonX - 18, buttonY - 1, '↻', {
+        fontFamily: FONT_FAMILY,
+        fontSize: '28px',
+        fontStyle: 'bold',
+        color: '#fff3d1',
+      })
+      .setOrigin(0.5);
+
+    this.resetHintText = this.add.text(
+      bubbleX + bubbleWidth / 2,
+      buttonY,
+      'R 또는 아이콘 두 번 · 기록 초기화',
+      {
+        fontFamily: FONT_FAMILY,
+        fontSize: '15px',
+        fontStyle: 'bold',
+        color: '#315d43',
+      },
+    ).setOrigin(0.5);
+
+    this.resetButton.on(
+      'pointerdown',
+      (
+        _pointer: Phaser.Input.Pointer,
+        _localX: number,
+        _localY: number,
+        event: Phaser.Types.Input.EventData,
+      ) => {
+        event.stopPropagation();
+
+        this.requestRecordReset();
+      },
+    );
+  }
+
+  private requestRecordReset(): void {
+    if (!this.resetArmed) {
+      this.resetArmed = true;
+      this.resetHintText.setText('한 번 더 누르세요 · R');
+      this.resetTimer = this.time.delayedCall(2500, () => {
+        this.resetArmed = false;
+        this.resetTimer = undefined;
+        this.resetHintText.setText('R 또는 아이콘 두 번 · 기록 초기화');
+      });
+      return;
+    }
+
+    this.resetArmed = false;
+    this.resetTimer?.remove(false);
+    this.resetTimer = undefined;
+    clearStoredRecords(localStorage);
+    this.bestScoreText.setText('0');
+    this.maxComboText.setText('× 0');
+    this.resetHintText.setText('기록이 초기화되었습니다');
+    this.time.delayedCall(1400, () => this.resetHintText.setText('R 또는 아이콘 두 번 · 기록 초기화'));
+  }
+
   private startGame(): void {
     if (this.isStarting) {
       return;
     }
 
     this.isStarting = true;
+    startMusic(this);
+    playAudio(this, AUDIO.start, { volume: 0.24 });
     this.cameras.main.fadeOut(280, 7, 27, 47);
     this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-      const nextScene = shouldShowTutorial(localStorage.getItem(TUTORIAL_SEEN_KEY))
+      const nextScene = shouldShowTutorial(sessionStorage.getItem(TUTORIAL_SEEN_KEY))
         ? 'TutorialScene'
         : 'GameScene';
       this.scene.start(nextScene);
@@ -195,6 +283,12 @@ export class TitleScene extends Phaser.Scene {
   }
 
   private startFromKeyboard(event: KeyboardEvent): void {
+    if (event.code === 'KeyR') {
+      if (!event.repeat) {
+        this.requestRecordReset();
+      }
+      return;
+    }
     if (!isConfirmKey(event)) {
       return;
     }

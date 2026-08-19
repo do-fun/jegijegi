@@ -2,26 +2,28 @@ import Phaser from 'phaser';
 import { GAME_HEIGHT, GAME_WIDTH } from '../dimensions';
 import { drawNaturalBackdrop } from '../naturalBackdrop';
 import { configureResponsiveCamera } from '../responsiveCamera';
+import { AUDIO, initializeAudio, playAudio, preloadAudio, setMusicVolume, startMusic } from '../audio';
+import {
+  createStagePerformances,
+  summarizePerformances,
+  type StagePerformance,
+} from '../resultStats';
 
 const FONT = 'Pretendard, Apple SD Gothic Neo, Noto Sans KR, sans-serif';
 
 export interface AllClearResult {
   score: number;
   bestScore: number;
-  totalSuccesses: number;
-  goodCount: number;
-  perfectCount: number;
   maxCombo: number;
+  stagePerformances: StagePerformance[];
 }
 
 export class ResultScene extends Phaser.Scene {
   private result: AllClearResult = {
     score: 0,
     bestScore: 0,
-    totalSuccesses: 0,
-    goodCount: 0,
-    perfectCount: 0,
     maxCombo: 0,
+    stagePerformances: createStagePerformances(10),
   };
 
   constructor() {
@@ -33,12 +35,17 @@ export class ResultScene extends Phaser.Scene {
   }
 
   preload(): void {
+    preloadAudio(this);
     if (!this.textures.exists('jegi-real')) {
       this.load.image('jegi-real', '/assets/items/jegi-real.png');
     }
   }
 
   create(): void {
+    initializeAudio(this);
+    startMusic(this, 0.1);
+    setMusicVolume(this, 0.1);
+    playAudio(this, AUDIO.allClear, { volume: 0.72 });
     configureResponsiveCamera(this);
     this.cameras.main.setBackgroundColor(0xaedbe8);
     drawNaturalBackdrop(this, GAME_HEIGHT - 62);
@@ -54,14 +61,6 @@ export class ResultScene extends Phaser.Scene {
     panel.fillStyle(0xfff4d6, 0.96).fillRoundedRect(280, 82, 880, 722, 32);
     panel.lineStyle(6, 0xf1bd4a, 0.95).strokeRoundedRect(280, 82, 880, 722, 32);
 
-    const colors = [0xef5b4c, 0x5bbbc8, 0xf1bd4a, 0x416f5b];
-    for (let index = 0; index < 54; index += 1) {
-      const x = 65 + ((index * 137) % (GAME_WIDTH - 130));
-      const y = 36 + ((index * 83) % 760);
-      panel.fillStyle(colors[index % colors.length], 0.82)
-        .fillRect(x, y, index % 2 === 0 ? 8 : 13, index % 3 === 0 ? 20 : 12);
-    }
-
     this.add.text(GAME_WIDTH / 2, 150, '10 STAGE ALL CLEAR!', {
       fontFamily: FONT,
       fontSize: '60px',
@@ -71,19 +70,19 @@ export class ResultScene extends Phaser.Scene {
       strokeThickness: 4,
     }).setOrigin(0.5);
 
-    this.add.text(GAME_WIDTH / 2, 222, '축하합니다! 모든 스테이지를 완주했습니다', {
+    this.add.text(GAME_WIDTH / 2, 210, '축하합니다! 모든 스테이지를 완주했습니다', {
       fontFamily: FONT,
       fontSize: '25px',
       fontStyle: 'bold',
       color: '#397064',
     }).setOrigin(0.5);
 
-    const jegi = this.add.image(GAME_WIDTH / 2, 402, 'jegi-real')
+    const jegi = this.add.image(1088, 194, 'jegi-real')
       .setOrigin(0.5, 0.86)
-      .setDisplaySize(90, 135);
+      .setDisplaySize(46, 69);
     this.tweens.add({
       targets: jegi,
-      y: 382,
+      y: 184,
       angle: 8,
       duration: 820,
       yoyo: true,
@@ -91,33 +90,67 @@ export class ResultScene extends Phaser.Scene {
       ease: 'Sine.inOut',
     });
 
+    const totals = summarizePerformances(this.result.stagePerformances);
     const stats = [
       { label: '최종 점수', value: this.result.score.toString(), color: '#d99a20' },
-      { label: '총 성공', value: `${this.result.totalSuccesses}회`, color: '#397064' },
-      { label: 'PERFECT', value: `${this.result.perfectCount}회`, color: '#168692' },
-      { label: 'GOOD', value: `${this.result.goodCount}회`, color: '#a76d00' },
+      { label: '총 성공', value: `${totals.totalSuccesses}회`, color: '#397064' },
+      { label: 'GOOD / PERFECT', value: `${totals.goodCount} / ${totals.perfectCount}`, color: '#168692' },
       { label: '최대 콤보', value: `${this.result.maxCombo}`, color: '#c94a40' },
       { label: '최고 점수', value: this.result.bestScore.toString(), color: '#6a63a8' },
     ];
 
     stats.forEach((stat, index) => {
-      const column = index % 3;
-      const row = Math.floor(index / 3);
-      const x = 410 + column * 310;
-      const y = 478 + row * 116;
-      panel.fillStyle(0xe9e2c7, 0.72).fillRoundedRect(x - 125, y - 40, 250, 92, 16);
-      this.add.text(x, y - 24, stat.label, {
+      const x = 360 + index * 180;
+      const y = 284;
+      panel.fillStyle(0xe9e2c7, 0.72).fillRoundedRect(x - 80, y - 38, 160, 78, 12);
+      this.add.text(x, y - 20, stat.label, {
         fontFamily: FONT,
-        fontSize: '17px',
+        fontSize: '14px',
         fontStyle: 'bold',
         color: '#6a766b',
       }).setOrigin(0.5);
-      this.add.text(x, y + 17, stat.value, {
+      this.add.text(x, y + 13, stat.value, {
         fontFamily: FONT,
-        fontSize: '30px',
+        fontSize: '24px',
         fontStyle: 'bold',
         color: stat.color,
       }).setOrigin(0.5);
+    });
+
+    panel.fillStyle(0x315d43, 0.96).fillRoundedRect(330, 342, 780, 38, 8);
+    const columns = [
+      { x: 380, label: 'STAGE' },
+      { x: 565, label: 'GOOD' },
+      { x: 755, label: 'PERFECT' },
+      { x: 990, label: '최대 연속 PERFECT' },
+    ];
+    columns.forEach((column) => {
+      this.add.text(column.x, 361, column.label, {
+        fontFamily: FONT,
+        fontSize: '15px',
+        fontStyle: 'bold',
+        color: '#fff3d1',
+      }).setOrigin(0.5);
+    });
+
+    this.result.stagePerformances.forEach((performance, index) => {
+      const y = 399 + index * 30;
+      panel.fillStyle(index % 2 === 0 ? 0xe9e2c7 : 0xf6edcf, 0.78)
+        .fillRoundedRect(330, y - 14, 780, 28, 5);
+      const values = [
+        `${index + 1}`,
+        `${performance.goodCount}`,
+        `${performance.perfectCount}`,
+        `× ${performance.maxConsecutivePerfects}`,
+      ];
+      values.forEach((value, columnIndex) => {
+        this.add.text(columns[columnIndex].x, y, value, {
+          fontFamily: FONT,
+          fontSize: '16px',
+          fontStyle: columnIndex === 0 ? 'bold' : 'normal',
+          color: columnIndex === 2 ? '#168692' : columnIndex === 3 ? '#c94a40' : '#315d43',
+        }).setOrigin(0.5);
+      });
     });
 
     const prompt = this.add.text(GAME_WIDTH / 2, 755, 'ESC  첫 페이지로', {
